@@ -1,61 +1,105 @@
-{-# LANGUAGE DeriveGeneric, DuplicateRecordFields #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveGeneric, DuplicateRecordFields, OverloadedStrings, GADTs #-}
 module VkAPI where
 
 import qualified Data.Text as T
 import Prelude hiding ( id )
 import GHC.Generics (Generic) 
-import Data.Aeson ( genericParseJSON
+import Data.Aeson ((.:), withObject, eitherDecode,  genericParseJSON
                   , genericToJSON
                   , FromJSON (parseJSON)
                   , ToJSON (toJSON)
                   , defaultOptions
                   , Options (..) )
+import Network.HTTP.Simple
+    ( Request, parseRequest_, Response, getResponseBody )
+import qualified Data.ByteString.Lazy.Char8 as LBC
+import Data.Aeson.Types (Value(Object))
 
-data VkResponse = VkRespounse 
-                  { ts :: T.Text 
-                  , updates :: [Update]
-                  } deriving (Show , Generic)
-instance FromJSON VkResponse
-instance ToJSON VkResponse
+
+
+
+{- getDecodeUpdate :: Response LBC.ByteString -> VkResponse    -- parse response from JSON
+getDecodeUpdate reseivingBC = let jsonBody = getResponseBody reseivingBC
+                                  vkResponse = eitherDecode jsonBody
+                              in case vkResponse of 
+                                    Left noDec -> error $ "can't decode last reseiving update: " <> noDec
+                                    Right res  -> res
+
+requestWith :: Request
+requestWith = parseRequest_ $ vkRequest key1 ts1 
+
+vkRequest :: String -> String -> String
+vkRequest key ts = "https://lp.vk.com/wh201350386?act=a_check&wait=25&mode=2&key=" <> key <> "&ts=" <> ts
+
+key1 :: String
+key1 = "f72bec46cbeefe48b841e4ca2b870fd99ed97591"
+ts1 :: String
+ts1 = "38" -}
+
+data VkUpdates = VkUpdates
+                 { ts :: T.Text 
+                 , updates :: [Update]
+                 } deriving (Show , Generic)
+instance FromJSON VkUpdates
+--instance ToJSON VkUpdates
 
 data Update = Update
-              { type_ :: T.Text 
-              , object_ :: Object 
-              , group_id_ :: Int 
-              } deriving (Show, Generic)
-instance FromJSON Update where
+              { _type :: T.Text 
+              , _object :: Object
+              , _group_id :: Int 
+              , _event_id :: T.Text 
+              } deriving Show
+{- instance FromJSON Update where
     parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
 instance ToJSON Update where
-    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1}        
+    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1} -}        
 
-data Object = Object
-              { message_new :: Maybe MessageNew
-              , message_reply :: Maybe PrivateMessage
-              , message_event :: Maybe MessageEvent
-              , photo_new :: Maybe Photo 
-          --    , photo_comment_new :: Maybe CommentPhoto
-              , audio_new :: Maybe Audio 
-              , video_new :: Maybe Video
-              , wall_post_new :: Maybe WallPostNew
-        --      , video_comment_new :: Maybe CommentVideo 
-              } deriving (Show , Generic)
-instance FromJSON  Object 
-instance ToJSON Object
+data Object = ObjMessageNew MessageNew
+            | ObjMessageReply MessageReply 
+            | ObjMessageEvent MessageEvent 
+            | ObjPhoto Photo
+            | ObjVideo Video
+            | ObjAudio Audio
+            | ObjWallPost WallPost
+                deriving Show 
 
-data MessageNew = MessageNew
-                  { message :: PrivateMessage
-                  , client_info :: Maybe ClientInfo
-                  } deriving (Show , Generic)
+instance FromJSON Update where
+    parseJSON = withObject "update" $ \v -> do
+        _type <- v .: "type" 
+        _object <- case _type :: T.Text of 
+            "message_new" -> ObjMessageNew <$> v .: "object"
+            "message_reply" -> ObjMessageReply <$> v .: "object"
+            "message_event" -> ObjMessageEvent <$> v .: "object"
+            "photo_new" -> ObjPhoto <$> v .: "object"
+            "video_new" -> ObjVideo <$> v .: "object"
+            "audio_new" -> ObjAudio <$> v .: "object"
+            "wall_post_new" -> ObjWallPost <$> v .: "object"
+        _group_id <- v .: "group_id"
+        _event_id <- v .: "event_id"
+        return Update{..}
+{- data MessageNew = MessageNewOldVer
+                | MessageNewNewVer { message :: PrivateMessage
+                                   , client_info :: Maybe ClientInfo
+                                   } deriving (Show , Generic)
 instance FromJSON MessageNew 
-instance ToJSON MessageNew
+instance ToJSON MessageNew -}
+
+type MessageNew = PrivateMessage
+type MessageReply = PrivateMessage
 
 data PrivateMessage = PrivateMessage
                       { id :: Int 
                       , date :: Int 
-                      , peer_id :: Int 
-                      , from_id :: Int 
-                      , text :: T.Text 
-                      , random_id :: Int 
+                      , out :: Maybe Int
+                      , user_id :: Int
+                      , from_id :: Maybe Int
+                      , read_state :: Int 
+                      , body :: Maybe T.Text 
+                      , text :: Maybe T.Text 
+                      , random_id :: Maybe Int 
+                      , title :: Maybe T.Text 
                       , ref :: Maybe T.Text 
                       , ref_source :: Maybe T.Text 
                       , attachments :: Maybe [Attachments] 
@@ -65,11 +109,14 @@ instance FromJSON PrivateMessage
 instance ToJSON PrivateMessage 
 
 data Attachments = Attachments
-                   { type_ :: T.Text 
-                   , asses_key_ :: Maybe T.Text 
+                   { _type :: T.Text 
+                   , _acces_key :: Maybe T.Text 
                    } deriving (Show , Generic)
-instance FromJSON  Attachments
-instance ToJSON Attachments
+instance FromJSON Attachments where
+    parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
+instance ToJSON Attachments where
+    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1}   
+      
 
 data ClientInfo = ClientInfo 
                   { button_actions :: [T.Text ]
@@ -97,9 +144,9 @@ instance FromJSON  Buttons
 instance ToJSON  Buttons
 
 data Action = Action 
-              { type_ :: T.Text 
-              , label_ :: T.Text 
-              , payload_ :: T.Text 
+              { _type :: T.Text 
+              , _label :: T.Text 
+              , _payload :: T.Text 
               } deriving (Show , Generic)
 instance FromJSON Action where
     parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
@@ -131,10 +178,10 @@ instance FromJSON Photo
 instance ToJSON Photo     
 
 data Sizes = Sizes
-             { url_ :: T.Text 
-             , width_ :: Int
-             , height_ :: Int
-             , type_ :: T.Text 
+             { _rl_ :: T.Text 
+             , _width :: Int
+             , _height :: Int
+             , _type :: T.Text 
              } deriving (Show , Generic)
 instance FromJSON Sizes where
     parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
@@ -165,7 +212,7 @@ data Video = Video
 instance FromJSON Video
 instance ToJSON Video
 
-data WallPostNew = WallPostNew
+data WallPost = WallPost
                 { id :: Int
                 , owner_id :: Int
                 , from_id :: Int
@@ -175,6 +222,6 @@ data WallPostNew = WallPostNew
                 , post_type :: T.Text 
                 , attachments :: [Attachments]
                 } deriving (Show, Generic) 
-instance FromJSON WallPostNew
-instance ToJSON WallPostNew
+instance FromJSON WallPost
+instance ToJSON WallPost
             

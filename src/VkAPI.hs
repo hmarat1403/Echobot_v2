@@ -6,7 +6,7 @@ module VkAPI where
 import qualified Data.Text as T
 import Prelude hiding ( id )
 import GHC.Generics (Generic) 
-import Data.Aeson ((.:), withObject, eitherDecode,  genericParseJSON
+import Data.Aeson (Value(Null), (.:?), (.:), withObject, eitherDecode,  genericParseJSON
                   , genericToJSON
                   , FromJSON (parseJSON)
                   , ToJSON (toJSON)
@@ -15,7 +15,7 @@ import Data.Aeson ((.:), withObject, eitherDecode,  genericParseJSON
 import Network.HTTP.Simple
     ( Request, parseRequest_, Response, getResponseBody )
 import qualified Data.ByteString.Lazy.Char8 as LBC
-import Data.Aeson.Types (Value(Object))
+import Data.Aeson.Types (parseFail, emptyObject, Value(Object))
 
 
 
@@ -51,20 +51,6 @@ data Update = Update
               , _group_id :: Int 
               , _event_id :: T.Text 
               } deriving Show
-{- instance FromJSON Update where
-    parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
-instance ToJSON Update where
-    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1} -}        
-
-data Object = ObjMessageNew MessageNew
-            | ObjMessageReply MessageReply 
-            | ObjMessageEvent MessageEvent 
-            | ObjPhoto Photo
-            | ObjVideo Video
-            | ObjAudio Audio
-            | ObjWallPost WallPost
-                deriving Show 
-
 instance FromJSON Update where
     parseJSON = withObject "update" $ \v -> do
         _type <- v .: "type" 
@@ -76,9 +62,22 @@ instance FromJSON Update where
             "video_new" -> ObjVideo <$> v .: "object"
             "audio_new" -> ObjAudio <$> v .: "object"
             "wall_post_new" -> ObjWallPost <$> v .: "object"
+            "wall_reply_new" -> ObjWallReply <$> v .: "object"
+            _ ->  parseFail "This message can't parsing yet"
         _group_id <- v .: "group_id"
         _event_id <- v .: "event_id"
-        return Update{..}
+        return Update{..}      
+
+data Object = ObjMessageNew MessageNew
+            | ObjMessageReply MessageReply 
+            | ObjMessageEvent MessageEvent 
+            | ObjPhoto Photo
+            | ObjVideo Video
+            | ObjAudio Audio
+            | ObjWallPost WallPost
+            | ObjWallReply WallReply
+                deriving Show 
+
 {- data MessageNew = MessageNewOldVer
                 | MessageNewNewVer { message :: PrivateMessage
                                    , client_info :: Maybe ClientInfo
@@ -99,27 +98,53 @@ data PrivateMessage = PrivateMessage
                       , body :: Maybe T.Text 
                       , text :: Maybe T.Text 
                       , random_id :: Maybe Int 
-                      , title :: Maybe T.Text 
+                      , title :: T.Text 
                       , ref :: Maybe T.Text 
                       , ref_source :: Maybe T.Text 
                       , attachments :: Maybe [Attachments] 
                       , keyboard :: Maybe Keyboard 
                       } deriving (Show , Generic) 
 instance FromJSON PrivateMessage 
-instance ToJSON PrivateMessage 
+--instance ToJSON PrivateMessage 
 
 data Attachments = Attachments
                    { _type :: T.Text 
-                   , _acces_key :: Maybe T.Text 
-                   } deriving (Show , Generic)
+                   , _object :: AttachObject
+                   , _access_key :: Maybe T.Text 
+                   } deriving Show 
 instance FromJSON Attachments where
-    parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
-instance ToJSON Attachments where
-    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1}   
-      
+    parseJSON = withObject "attachment" $ \v -> do
+        _type <- v .: "type" 
+        _object <- case _type :: T.Text of 
+            "photo" -> AttachPhoto <$> v .: "photo"
+            "video" -> AttachVideo <$> v .: "video"
+            "audio" -> AttachAudio <$> v .: "audio"
+            "doc" -> AttachDocument <$> v .: "doc"
+            "link" -> AttachLink <$> v .: "link"
+            "market" -> AttachMarket <$> v .: "market"
+            "market_album" -> AttachMarketAlbum <$> v .: "market_album"
+            "wall" -> AttachWallPost <$> v .: "wall"
+            "wall_reply" -> AttachWallReply <$> v .: "wall_reply"
+            "sticker" -> AttachSticker <$> v .: "sticker"
+            "gift" -> AttachWallPost <$> v .: "gift"
+        _access_key <- v .:? "access_key"
+        return Attachments{..}   
+
+data AttachObject = AttachPhoto Photo 
+                  | AttachAudio Audio    
+                  | AttachVideo Video
+                  | AttachLink Link
+                  | AttachDocument Document
+                  | AttachMarket Market
+                  | AttachMarketAlbum MarketAlbum
+                  | AttachGift Gift
+                  | AttachWallPost WallPost
+                  | AttachWallReply WallReply
+                  | AttachSticker Sticker
+                    deriving Show 
 
 data ClientInfo = ClientInfo 
-                  { button_actions :: [T.Text ]
+                  { button_actions :: [T.Text]
                   , keyboard :: Bool 
                   , inline_keyboard :: Bool 
                   , carousel :: Bool 
@@ -168,7 +193,7 @@ data Photo = Photo
              , album_id :: Int
              , owner_id :: Int
              , user_id :: Maybe Int
-             , text :: Maybe T.Text 
+             , text :: T.Text 
              , date :: Int 
              , sizes :: Maybe [Sizes] 
              , width :: Int
@@ -191,10 +216,10 @@ instance ToJSON Sizes where
 data Audio = Audio
              { id :: Int
              , owner_id :: Int
-             , artist :: Maybe T.Text 
-             , title :: Maybe T.Text 
-             , duration :: Maybe Int
-             , url :: Maybe T.Text 
+             , artist :: T.Text 
+             , title :: T.Text 
+             , duration :: Int
+             , url :: T.Text 
              , date :: Int
              } deriving (Show , Generic)
 instance FromJSON Audio
@@ -203,9 +228,9 @@ instance ToJSON Audio
 data Video = Video
              { id :: Int
              , owner_id :: Int
-             , title :: Maybe T.Text 
-             , description :: Maybe T.Text 
-             , duration :: Maybe Int
+             , title :: T.Text 
+             , description :: T.Text 
+             , duration :: Int
              , date :: Int
              , access_key :: Maybe T.Text 
              } deriving (Show , Generic)       
@@ -214,7 +239,8 @@ instance ToJSON Video
 
 data WallPost = WallPost
                 { id :: Int
-                , owner_id :: Int
+                , owner_id :: Maybe Int
+                , to_id :: Maybe Int 
                 , from_id :: Int
                 , created_by :: Int
                 , date :: Int
@@ -223,5 +249,93 @@ data WallPost = WallPost
                 , attachments :: [Attachments]
                 } deriving (Show, Generic) 
 instance FromJSON WallPost
-instance ToJSON WallPost
+--instance ToJSON WallPost
             
+data Document = Document 
+               { _id :: Int
+               , _owner_id :: Maybe Int
+               , _title :: T.Text 
+               , _size :: Int
+               , _ext :: Maybe T.Text 
+               , _url :: T.Text 
+               , _date :: Int
+               , _type :: Int
+               } deriving (Show, Generic)   
+instance FromJSON Document where
+    parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = drop 1}
+instance ToJSON Document where
+    toJSON = genericToJSON defaultOptions {fieldLabelModifier = drop 1}                 
+
+data Link = Link
+           { url :: T.Text 
+           , title :: T.Text 
+           , description :: Maybe T.Text 
+           , photo :: Maybe Photo
+           , image_src :: T.Text 
+           , preview_page :: T.Text 
+           , preview_url :: T.Text 
+           } deriving (Show , Generic)
+instance FromJSON Link
+instance ToJSON Link
+
+data WallReply = WallReply
+                 { id :: Int
+                 , from_id :: Int
+                 , post_id :: Maybe Int
+                 , post_owner_id :: Maybe Int 
+                 , owner_id :: Maybe Int
+                 , date :: Int 
+                 , text :: T.Text 
+                 , attachments :: Maybe Attachments
+                 } deriving (Show , Generic)
+instance FromJSON WallReply
+--instance ToJSON WallReply
+
+data Sticker = Sticker
+               { product_id :: Int
+               , stticker_id :: Int
+               , images :: [Image]
+               , images_with_background :: [Image]
+               , animation_url :: Maybe T.Text 
+               , is_allowed :: Bool 
+               } deriving (Show , Generic)
+instance FromJSON  Sticker
+instance ToJSON Sticker
+
+data Image = Image 
+             { url :: T.Text 
+             , width :: Int
+             , height :: Int
+             } deriving (Show , Generic)
+instance FromJSON Image
+instance ToJSON Image       
+
+data Gift = Gift
+            { id :: Int
+            , thumb_256 :: T.Text 
+            , thumb_96 :: T.Text 
+            , thumb_48 :: T.Text
+            } deriving (Show , Generic)
+instance FromJSON  Gift
+instance ToJSON Gift            
+
+data Market = Market 
+              { id :: Int
+              , owner_id :: Int
+              , title :: Maybe T.Text 
+              , description :: Maybe T.Text 
+              , date :: Int
+              } deriving (Show , Generic)
+instance FromJSON  Market
+instance ToJSON Market          
+
+data MarketAlbum = MarketAlbum
+                   { id :: Int
+                   , owner_id :: Int
+                   , title :: T.Text 
+                   , photo :: Maybe Photo
+                   , count :: Int
+                   , updated_time :: Int 
+                   } deriving (Show , Generic)
+instance FromJSON  MarketAlbum
+instance ToJSON MarketAlbum                   

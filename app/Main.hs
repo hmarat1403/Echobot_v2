@@ -33,6 +33,6 @@ vkRequest :: String -> String -> String
 vkRequest key ts = "https://lp.vk.com/wh201350386?act=a_check&wait=25&mode=2&key=" <> key <> "&ts=" <> ts
 
 key1 :: String
-key1 = "64fff6459b0f1d949e9a73096e810ec7c0391dd4"
+key1 = "fa47622c0f4fd0252148631d10183de068a8cbb5"
 ts1 :: String
-ts1 = "45"
+ts1 = "58"
